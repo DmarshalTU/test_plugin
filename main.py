@@ -1,16 +1,10 @@
-import json
 import uvicorn
-from pprint import pprint
-
-from fastapi import FastAPI, Request
-from pydantic import BaseSettings
 from starlette.middleware.cors import CORSMiddleware
 from starlette.responses import FileResponse, PlainTextResponse, StreamingResponse
 from fastapi.openapi.utils import get_openapi
-from fastapi import FastAPI
+from fastapi import FastAPI, File, UploadFile, Request
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
-from typing import Optional, List
+
 
 
 is_secure = False
@@ -32,6 +26,10 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+@app.get("/openapi.yaml", response_class=FileResponse)
+async def read_openapi():
+    return "./openapi.yaml" 
 
 
 @app.get("/myself/{name}")
