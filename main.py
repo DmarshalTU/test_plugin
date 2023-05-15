@@ -1,56 +1,86 @@
 import json
+import uvicorn
+from pprint import pprint
 
-import quart
-import quart_cors
-from quart import request
+from fastapi import FastAPI, Request
+from pydantic import BaseSettings
+from starlette.middleware.cors import CORSMiddleware
+from starlette.responses import FileResponse, PlainTextResponse, StreamingResponse
+from fastapi.openapi.utils import get_openapi
+from fastapi import FastAPI
+from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel
+from typing import Optional, List
 
-app = quart_cors.cors(quart.Quart(__name__), allow_origin="https://chat.openai.com")
 
-# Keep track of todo's. Does not persist if Python session is restarted.
-_TODOS = {}
+is_secure = False
 
-@app.post("/todos/<string:username>")
-async def add_todo(username):
-    request = await quart.request.get_json(force=True)
-    if username not in _TODOS:
-        _TODOS[username] = []
-    _TODOS[username].append(request["todo"])
-    return quart.Response(response='OK', status=200)
+app = FastAPI()
 
-@app.get("/todos/<string:username>")
-async def get_todos(username):
-    return quart.Response(response=json.dumps(_TODOS.get(username, [])), status=200)
+app.mount("/.well-known", StaticFiles(directory=".well-known"), name="well-known")
 
-@app.delete("/todos/<string:username>")
-async def delete_todo(username):
-    request = await quart.request.get_json(force=True)
-    todo_idx = request["todo_idx"]
-    # fail silently, it's a simple plugin
-    if 0 <= todo_idx < len(_TODOS[username]):
-        _TODOS[username].pop(todo_idx)
-    return quart.Response(response='OK', status=200)
 
-@app.get("/logo.png")
+
+origins = [
+    "https://chat.openai.com",
+]
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+
+@app.get("/myself/{name}")
+async def get_today(name):
+    return {
+        "name": name,
+        "display": f"![Profile Picture](https://dummyimage.com/600x400/000/fff)",
+    }
+
+
+@app.get("/image/{name}")
+async def get_fig(name):
+    return f"https://placehold.co/600x400?text={name}"
+
+
+@app.get("/logo.png", include_in_schema=False)
 async def plugin_logo():
     filename = 'logo.png'
-    return await quart.send_file(filename, mimetype='image/png')
+    return FileResponse(filename, media_type='image/png')
 
-@app.get("/.well-known/ai-plugin.json")
-async def plugin_manifest():
-    host = request.headers['Host']
-    with open("./.well-known/ai-plugin.json") as f:
-        text = f.read()
-        return quart.Response(text, mimetype="text/json")
 
-@app.get("/openapi.yaml")
-async def openapi_spec():
-    host = request.headers['Host']
-    with open("openapi.yaml") as f:
-        text = f.read()
-        return quart.Response(text, mimetype="text/yaml")
+@app.get("/.well-known/ai-plugin.json", response_class=PlainTextResponse, include_in_schema=False)
+async def plugin_manifest(request: Request):
+    host = request.headers["host"]
 
-def main():
-    app.run(debug=True, host="0.0.0.0", port=5003)
+    def iterfile():
+        with open(".well-known/ai-plugin.json") as f:
+            text = f.read()
+            text = text.replace("PLUGIN_HOSTNAME", f"http://{host}")
+            yield from text
+
+    return StreamingResponse(iterfile(), media_type="application/json")
+
+
+def custom_openapi():
+    openapi_schema = get_openapi(
+        title="ChatGPT4 Plugin: About Myself",
+        version="2.5.0",
+        description="Try to chat with Me!",
+        routes=app.routes,
+    )
+    openapi_schema["info"]["x-logo"] = {
+        "url": "https://fastapi.tiangolo.com/img/logo-margin/logo-teal.png"
+    }
+    app.openapi_schema = openapi_schema
+    return app.openapi_schema
+
+
+app.openapi = custom_openapi
 
 if __name__ == "__main__":
-    main()
+    uvicorn.run(app='main:app', reload=True, host="0.0.0.0")
